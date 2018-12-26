@@ -1,0 +1,117 @@
+ 	DECLARE @AcctCode nchar(10), @AcctCode2 nchar(10) 
+		SET @AcctCode = '118001'
+
+		IF 'All' = 'All'
+		BEGIN
+			SET @AcctCode = '118001'
+			SET @AcctCode2 = '118002'
+		END
+
+	    SELECT A.TransId,A.U_WHTNo AS NTransId, A.TaxDate AS TaxDate, 
+        CASE WHEN A.TransType = 18 THEN C.NumAtCard ELSE
+		CASE WHEN A.TransType = 19 THEN D.NumAtCard ELSE
+		CASE WHEN A.TransType = 30 THEN A.U_WHTNo ELSE
+		CASE WHEN A.TransType = 204 THEN E.NumAtCard ELSE A.Ref1 END END END END AS NumAtCard,
+		CASE WHEN A.TransType = 30 THEN A.BaseRef ELSE 
+		CASE WHEN A.TransType = 204 THEN A.BaseRef ELSE A.BaseRef END END AS TransRef,
+		A.Ref2 AS TaxRef, ISNULL(A.VatGroup, '') AS VatGroup, 
+		CASE WHEN G.CardCode IS NULL THEN A.U_TaxID ELSE G.LicTradNum END AS AddID,
+		CASE WHEN G.CardCode IS NULL THEN ISNULL(A.U_APNAME, '') ELSE G.CardName END AS CustName,
+        CASE WHEN A.TransType = 18 THEN C.Branch ELSE 
+		CASE WHEN A.TransType = 19 THEN D.Branch ELSE 
+		CASE WHEN A.TransType = 204 THEN E.Branch ELSE 
+		CASE WHEN A.TransType = 24 THEN '' ELSE ISNULL(A.U_BRANCH, '') END END END END AS Branch,
+		CASE WHEN A.TransType = 18 THEN C.BranchName ELSE 
+		CASE WHEN A.TransType = 19 THEN D.BranchName ELSE 
+		CASE WHEN A.TransType = 204 THEN E.BranchName ELSE 
+		CASE WHEN A.TransType = 24 THEN '' ELSE ISNULL(A.U_BRANCH, '') END END END END AS BranchName,
+		SUM(CASE WHEN A.VatGroup IS NULL THEN ((Debit - Credit) * 100 / 7) ELSE 
+		CASE WHEN Debit - Credit < 0 THEN ABS(BaseSum) * -1 ELSE BaseSum END END) AS BaseAmount,
+		SUM(A.SYSDeb - A.SYSCred) AS VatAmt,
+		CASE WHEN A.TransType = 18 THEN C.sType ELSE 
+		CASE WHEN A.TransType = 19 THEN D.sType ELSE 
+		CASE WHEN A.TransType = 204 THEN E.sType ELSE 
+		CASE WHEN A.TransType = 24 THEN E.sType ELSE
+		CASE WHEN A.TransType = 30 THEN 'JE' ELSE SUBSTRING(H.SeriesName, 1, 3) END END END END END AS DocType,
+        CASE WHEN A.TransType = 19 THEN D.CANCELED ELSE 
+		CASE WHEN A.TransType = 18 THEN C.CANCELED ELSE 
+		CASE WHEN A.TransType = 204 THEN E.CANCELED ELSE 'N' END END END AS CANCEL
+
+        FROM JDT1 A INNER JOIN OJDT AA ON A.TransId = AA.TransId AND (AA.U_TransVat IS NULL OR AA.U_TransVat <> 'NO')
+        AND ((AA.U_PERIOD = RTRIM('')) OR (AA.U_PERIOD IS NULL AND ISNULL(A.U_TaxDate, A.TaxDate) BETWEEN '2018-09-26' AND '2018-12-26'))
+		INNER JOIN OACT B ON A.Account = B.AcctCode 
+		
+		LEFT OUTER JOIN 
+		(SELECT A.DocEntry, A.TransId, ISNULL(B.BeginStr, SUBSTRING(B.SeriesName, 1, 3)) AS sType, A.CardCode, 
+		ISNULL(C.GlblLocNum, '00000') AS Branch ,
+		CASE WHEN ISNULL(C.GlblLocNum, '00000') = '00000' THEN N'สำนักงานใหญ่' ELSE c.GlblLocNum END AS BranchName,
+		 A.CANCELED, A.NumAtCard
+		 FROM OPCH A INNER JOIN NNM1 B ON A.Series = B.Series
+		 LEFT OUTER JOIN CRD1 C ON A.PayToCode = C.Address AND A.CardCode = C.CardCode AND C.AdresType = 'B') AS C 
+		 ON A.TransId = C.TransId AND A.TransType =  18
+		
+		LEFT OUTER JOIN 
+		(SELECT A.DocEntry, A.TransId, ISNULL(B.BeginStr, SUBSTRING(B.SeriesName, 1, 3)) AS sType, A.CardCode, 
+		ISNULL(C.GlblLocNum, '00000') AS Branch ,
+		CASE WHEN ISNULL(C.GlblLocNum, '00000') = '00000' THEN N'สำนักงานใหญ่' ELSE c.GlblLocNum END AS BranchName,
+		 A.CANCELED, A.NumAtCard
+		FROM ORPC A INNER JOIN NNM1 B ON A.Series = B.Series
+		LEFT OUTER JOIN CRD1 C ON A.PayToCode = C.Address AND A.CardCode = C.CardCode AND C.AdresType = 'B') AS D 
+		ON A.TransId = D.TransId AND A.TransType = 19
+		
+		LEFT OUTER JOIN 
+		(SELECT A.DocEntry, A.TransId,ISNULL(B.BeginStr, SUBSTRING(B.SeriesName, 1, 3)) AS sType, A.CardCode, 
+		ISNULL(C.GlblLocNum, '00000') AS Branch ,
+		CASE WHEN ISNULL(C.GlblLocNum, '00000') = '00000' THEN N'สำนักงานใหญ่' ELSE c.GlblLocNum END AS BranchName,
+		 A.CANCELED, A.NumAtCard
+		FROM ODPO A INNER JOIN NNM1 B ON A.Series = B.Series
+		LEFT OUTER JOIN CRD1 C ON A.PayToCode = C.Address AND A.CardCode = C.CardCode AND C.AdresType = 'B') AS E 
+		ON A.TransId = E.TransId AND A.TransType = 204
+		
+		LEFT OUTER JOIN OCRD G ON  
+		CASE WHEN A.TransType = 18 THEN C.CardCode ELSE
+		CASE WHEN A.TransType = 19 THEN D.CardCode ELSE
+		CASE WHEN A.TransType = 204 THEN E.CardCode ELSE ISNULL(A.U_CardCode, '') END END END = G.CardCode
+		 
+		LEFT OUTER JOIN NNM1 H ON AA.Series = H.Series
+		 
+		WHERE A.Account IN (RTRIM(@AcctCode) , RTRIM(@AcctCode2))
+		AND A.RefDate BETWEEN '2018-09-26' AND '2018-12-26'
+		AND ISNULL(A.VatGroup, '') IN ((CASE WHEN 'All' = 'All' THEN 'P07' ELSE 'All' END), (CASE WHEN 'All' = 'All' THEN 'P07S' ELSE 'All' END))
+
+		AND CASE WHEN A.TransType = 19 THEN D.CANCELED ELSE CASE WHEN A.TransType = 18 THEN C.CANCELED ELSE CASE 
+		WHEN A.TransType = 204 THEN E.CANCELED ELSE 'N' END END END IN ('N', 'Y')
+		AND (AA.TransId NOT IN (SELECT StornoToTr FROM OJDT WHERE StornoToTr <> '')) AND (AA.StornoToTr IS NULL)
+		OR ((AA.U_PERIOD = RTRIM('')) AND A.Account = RTRIM(@AcctCode))
+	
+		GROUP BY  A.TransId,A.U_WHTNo, A.TaxDate,
+		CASE WHEN A.TransType = 30 THEN A.BaseRef ELSE 
+		CASE WHEN A.TransType = 204 THEN A.BaseRef ELSE A.BaseRef END END,
+		A.Ref2, A.VatGroup, 
+		CASE WHEN G.CardCode IS NULL THEN A.U_TaxID ELSE G.LicTradNum END,
+		CASE WHEN G.CardCode IS NULL THEN ISNULL(A.U_APNAME, '') ELSE G.CardName END, 
+        CASE WHEN A.TransType = 18 THEN C.Branch ELSE 
+		CASE WHEN A.TransType = 19 THEN D.Branch ELSE 
+		CASE WHEN A.TransType = 204 THEN E.Branch ELSE 
+		CASE WHEN A.TransType = 24 THEN '' ELSE ISNULL(A.U_BRANCH, '')  END END END END,
+		CASE WHEN A.TransType = 18 THEN C.BranchName ELSE 
+		CASE WHEN A.TransType = 19 THEN D.BranchName ELSE 
+		CASE WHEN A.TransType = 204 THEN E.BranchName ELSE 
+		CASE WHEN A.TransType = 24 THEN '' ELSE ISNULL(A.U_BRANCH, '') END END END END,
+		CASE WHEN A.TransType = 18 THEN C.sType ELSE 
+		CASE WHEN A.TransType = 19 THEN D.sType ELSE 
+		CASE WHEN A.TransType = 204 THEN E.sType ELSE 
+		CASE WHEN A.TransType = 24 THEN E.sType ELSE
+		CASE WHEN A.TransType = 30 THEN 'JE' ELSE SUBSTRING(H.SeriesName, 1, 3) END END END END END,
+        CASE WHEN A.TransType = 19 THEN D.CANCELED ELSE 
+		CASE WHEN A.TransType = 18 THEN C.CANCELED ELSE 
+		CASE WHEN A.TransType = 204 THEN E.CANCELED ELSE 'N' END END END,
+
+		CASE WHEN A.TransType = 18 THEN C.NumAtCard ELSE
+		CASE WHEN A.TransType = 19 THEN D.NumAtCard ELSE
+		CASE WHEN A.TransType = 30 THEN A.U_WHTNo ELSE
+		CASE WHEN A.TransType = 204 THEN E.NumAtCard ELSE A.Ref1 END END END END 
+        
+		ORDER BY A.TaxDate, 
+		(CASE WHEN A.TransType = 30 THEN A.BaseRef ELSE 
+		CASE WHEN A.TransType = 204 THEN A.BaseRef ELSE A.BaseRef END END), A.TransId 
